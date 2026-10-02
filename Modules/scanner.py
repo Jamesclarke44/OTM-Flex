@@ -15,29 +15,29 @@ to identify potential Bull Put and Bear Call credit spreads.
 import math
 import pandas as pd
 
-from modules.market_data import (
+from Modules.market_data import (
     get_current_price,
     get_historical_data,
 )
 
-from modules.indicators import (
+from Modules.indicators import (
     get_latest_indicators,
     determine_trend,
 )
 
-from modules.options import (
+from Modules.options import (
     get_valid_expirations,
     get_option_chain,
     clean_option_data,
     calculate_dte,
 )
 
-from modules.greeks import (
+from Modules.greeks import (
     calculate_delta,
     calculate_implied_volatility,
 )
 
-from modules.rules import (
+from Modules.rules import (
     evaluate_trade,
     get_overall_status,
 )
