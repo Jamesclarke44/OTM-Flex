@@ -1,26 +1,26 @@
 import streamlit as st
 import pandas as pd
 
-from modules.market_data import (
+from Modules.market_data import (
     get_current_price,
     get_price_change,
     get_historical_data,
 )
 
-from modules.indicators import (
+from Modules.indicators import (
     get_latest_indicators,
     determine_trend,
 )
 
-from modules.scanner import scan_market
+from Modules.scanner import scan_market
 
-from modules.rules import (
+from Modules.rules import (
     evaluate_trade,
     get_overall_status,
     calculate_profit_target,
 )
 
-from modules.position_sizing import (
+from Modules.position_sizing import (
     analyze_position,
 )
 
