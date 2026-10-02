@@ -1,251 +1,316 @@
 import streamlit as st
 
-from modules.trend import evaluate_trend
-from modules.questionable import evaluate_questionable_trade
-from modules.delta import evaluate_delta
-from modules.distance import evaluate_distance
-from modules.credit import calculate_credit_metrics
-from modules.position_size import calculate_position_size
-from modules.support_resistance import (
-    evaluate_support_resistance
-)
 
-from modules.setup_quality import (
-    evaluate_setup_quality
-)
-
+# ============================================================
+# OTM FLEX™ CREDIT SPREAD TRADING APP
+# ============================================================
 
 st.set_page_config(
-    page_title="OTM Flex",
-    page_icon="📉",
-    layout="centered"
+    page_title="OTM Flex™",
+    page_icon="📈",
+    layout="wide",
 )
 
-st.title("📉 OTM Flex")
-st.subheader("Credit Spread Decision Engine")
 
-# --------------------------------------------------
-# Inputs
-# --------------------------------------------------
+# ============================================================
+# HEADER
+# ============================================================
 
-price = st.number_input(
-    "Current Price",
-    value=278.91,
-    step=0.01
+st.title("📈 OTM Flex™")
+st.subheader("Credit Spread Trading System")
+
+st.markdown(
+    """
+    **Mission:** Generate consistent option income by selling
+    high-probability credit spreads while managing risk primarily
+    through distance from price.
+    """
 )
-
-ema20 = st.number_input(
-    "EMA20",
-    value=284.94,
-    step=0.01
-)
-
-ema200 = st.number_input(
-    "EMA200",
-    value=274.53,
-    step=0.01
-)
-
-rsi = st.number_input(
-    "RSI",
-    value=32.48,
-    step=0.01
-)
-
-atr = st.number_input(
-    "ATR",
-    value=4.50,
-    step=0.01
-)
-
-delta = st.number_input(
-    "Short Strike Delta",
-    value=0.11,
-    step=0.01
-)
-
-strike = st.number_input(
-    "Short Strike",
-    value=290.00,
-    step=1.0
-)
-
-credit = st.number_input(
-    "Credit Received",
-    value=0.39,
-    step=0.01
-)
-
-width = st.number_input(
-    "Spread Width",
-    value=5.00,
-    step=0.50
-)
-
-account_size = st.number_input(
-    "Account Size",
-    value=5954.00,
-    step=100.00
-)
-
-risk_pct = st.number_input(
-    "Risk Per Trade (%)",
-    value=2.0,
-    step=0.5
-)
-
-# --------------------------------------------------
-# Trend
-# --------------------------------------------------
 
 st.divider()
 
-trend = evaluate_trend(
-    price,
-    ema20
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.title("OTM Flex™")
+
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "Scanner",
+        "Rule Checker",
+        "Position Sizing",
+        "Trade Journal",
+        "Rule Book",
+    ],
 )
 
-st.header("Trend")
 
-st.success(
-    trend["direction"]
-)
+# ============================================================
+# DASHBOARD
+# ============================================================
 
-# --------------------------------------------------
-# Questionable Trade Filter
-# --------------------------------------------------
+if page == "Dashboard":
 
-trade_check = evaluate_questionable_trade(
-    trend["side"],
-    price,
-    ema20,
-    ema200,
-    rsi,
-    atr
-)
+    st.header("Market Dashboard")
 
-st.header("Questionable Trade Filter")
-
-if trade_check["questionable"]:
-
-    st.warning(
-        "⚠️ Questionable Trade"
+    st.info(
+        "Live market data and technical indicators will be connected "
+        "in the next modules."
     )
 
-    for reason in trade_check["reasons"]:
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("SPY", "—")
+
+    with col2:
+        st.metric("QQQ", "—")
+
+    with col3:
+        st.metric("IWM", "—")
+
+    with col4:
+        st.metric("VOO", "—")
+
+    st.divider()
+
+    st.subheader("OTM Flex™ Status")
+
+    st.write(
+        "The scanner will evaluate trend, delta, distance, ATR, "
+        "volatility, liquidity and DTE."
+    )
+
+
+# ============================================================
+# SCANNER
+# ============================================================
+
+elif page == "Scanner":
+
+    st.header("🔎 Credit Spread Scanner")
+
+    st.write(
+        "Find potential Bull Put and Bear Call spreads "
+        "using the OTM Flex™ rules."
+    )
+
+    ticker = st.selectbox(
+        "Underlying",
+        ["SPY", "QQQ", "IWM", "VOO"],
+    )
+
+    st.info(
+        f"Scanner for **{ticker}** will be connected next."
+    )
+
+
+# ============================================================
+# RULE CHECKER
+# ============================================================
+
+elif page == "Rule Checker":
+
+    st.header("✅ OTM Flex™ Rule Checker")
+
+    st.write(
+        "Every potential trade will be checked against "
+        "your trading rules."
+    )
+
+    rules = [
+        "Trend",
+        "EMA structure",
+        "RSI",
+        "MACD",
+        "Short-leg delta",
+        "OTM distance",
+        "ATR distance",
+        "Volatility",
+        "Liquidity",
+        "DTE",
+        "Earnings",
+    ]
+
+    for rule in rules:
+        st.write(f"⬜ {rule}")
+
+
+# ============================================================
+# POSITION SIZING
+# ============================================================
+
+elif page == "Position Sizing":
+
+    st.header("💰 Position Sizing")
+
+    account_size = st.number_input(
+        "Account Size ($)",
+        min_value=0.0,
+        value=20000.0,
+        step=1000.0,
+    )
+
+    risk_percent = st.number_input(
+        "Maximum Risk Per Trade (%)",
+        min_value=0.1,
+        max_value=100.0,
+        value=20.0,
+        step=1.0,
+    )
+
+    spread_width = st.number_input(
+        "Spread Width ($)",
+        min_value=1.0,
+        value=5.0,
+        step=1.0,
+    )
+
+    credit = st.number_input(
+        "Credit Received Per Spread ($)",
+        min_value=0.01,
+        value=1.00,
+        step=0.05,
+    )
+
+    max_risk = account_size * (risk_percent / 100)
+
+    max_loss_per_contract = (spread_width - credit) * 100
+
+    if max_loss_per_contract > 0:
+
+        contracts = int(max_risk // max_loss_per_contract)
+
+        total_risk = contracts * max_loss_per_contract
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                "Maximum Allowed Risk",
+                f"${max_risk:,.2f}",
+            )
+
+        with col2:
+            st.metric(
+                "Max Loss / Contract",
+                f"${max_loss_per_contract:,.2f}",
+            )
+
+        with col3:
+            st.metric(
+                "Contracts",
+                contracts,
+            )
+
         st.write(
-            f"• {reason}"
+            f"Maximum theoretical risk: "
+            f"**${total_risk:,.2f}**"
         )
 
-    if trend["side"] == "call":
+    else:
 
-        st.markdown("""
-### Bear Call Confirmation
+        st.error(
+            "Credit must be less than the spread width."
+        )
 
-Require at least 2:
 
-- Price reaches resistance
-- RSI turns down
-- MACD rolls over
-- Rejection candle forms
-""")
+# ============================================================
+# TRADE JOURNAL
+# ============================================================
 
-    elif trend["side"] == "put":
+elif page == "Trade Journal":
 
-        st.markdown("""
-### Bull Put Confirmation
+    st.header("📓 Trade Journal")
 
-Require at least 2:
-
-- Price reaches support
-- RSI turns higher
-- MACD turns higher
-- Bullish candle forms
-""")
-
-else:
-
-    st.success(
-        "✅ No questionable trade conditions detected"
+    st.info(
+        "Trade journaling will be added in a later module."
     )
 
-# --------------------------------------------------
-# Delta
-# --------------------------------------------------
+    st.write(
+        "The journal will eventually track entries, exits, "
+        "credits, losses, winners, DTE, delta and rule compliance."
+    )
 
-st.header("Delta Check")
 
-delta_result = evaluate_delta(
-    delta
-)
+# ============================================================
+# RULE BOOK
+# ============================================================
 
-st.write(
-    f"Delta Rating: {delta_result['rating']}"
-)
+elif page == "Rule Book":
 
-# --------------------------------------------------
-# Distance
-# --------------------------------------------------
+    st.header("📖 OTM Flex™ Rule Book")
 
-st.header("Distance")
+    st.subheader("Mission")
 
-distance_result = evaluate_distance(
-    price,
-    strike,
-    atr
-)
+    st.write(
+        "Generate consistent option income by selling "
+        "high-probability credit spreads while managing "
+        "risk through distance from price."
+    )
 
-st.write(
-    f"Distance from Price: {distance_result['distance']}"
-)
+    st.subheader("Core Rules")
 
-st.write(
-    f"ATR Multiple: {distance_result['atr_multiple']}"
-)
+    st.markdown(
+        """
+        **1. Trend**
+        
+        Trade in the direction of the prevailing trend.
 
-# --------------------------------------------------
-# Credit
-# --------------------------------------------------
+        **2. Short Delta**
 
-st.header("Credit Metrics")
+        Target approximately **0.10–0.18 delta**.
 
-credit_metrics = calculate_credit_metrics(
-    credit,
-    width
-)
+        **3. OTM Flex™**
 
-st.write(
-    f"Max Loss: ${credit_metrics['max_loss']}"
-)
+        If the trade becomes uncomfortable, move the
+        short strike farther OTM.
 
-st.write(
-    f"Profit Target (50%): ${credit_metrics['profit_target']}"
-)
+        **4. ATR Distance**
 
-st.write(
-    f"Stop Loss (2x Credit): ${credit_metrics['stop_loss']}"
-)
+        Give the trade sufficient room for normal market movement.
 
-st.write(
-    f"ROC: {credit_metrics['roc']}%"
-)
+        **5. Volatility**
 
-# --------------------------------------------------
-# Position Size
-# --------------------------------------------------
+        Higher volatility → greater distance from price.
 
-st.header("Position Size")
+        **6. Support / Resistance**
 
-position = calculate_position_size(
-    account_size,
-    risk_pct,
-    credit_metrics["max_loss"]
-)
+        Use important levels as additional context.
 
-st.write(
-    f"Risk Budget: ${position['risk_dollars']}"
-)
+        **7. DTE**
 
-st.write(
-    f"Max Contracts: {position['contracts']}"
-)
+        Typical target: **7–45 DTE**.
+
+        **8. Liquidity**
+
+        Prefer liquid ETFs and tight option spreads.
+
+        **9. Earnings**
+
+        Avoid individual-stock earnings exposure.
+
+        **10. Profit Taking**
+
+        Target approximately **50% of maximum profit**.
+
+        **11. Threatened Trades**
+
+        Reassess the original thesis before allowing
+        the position to approach maximum loss.
+
+        **12. Position Sizing**
+
+        Size trades according to the account's defined
+        maximum risk.
+        """
+    )
+
+    st.success(
+        "OTM Flex™ principle: Stay out of the money. "
+        "Stay flexible. Collect premium."
+    )
