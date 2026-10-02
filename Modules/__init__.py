@@ -1,1 +1,3 @@
-
+"""
+OTM Flex™ modules package.
+"""
