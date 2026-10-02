@@ -6,6 +6,13 @@ from modules.delta import evaluate_delta
 from modules.distance import evaluate_distance
 from modules.credit import calculate_credit_metrics
 from modules.position_size import calculate_position_size
+from modules.support_resistance import (
+    evaluate_support_resistance
+)
+
+from modules.setup_quality import (
+    evaluate_setup_quality
+)
 
 
 st.set_page_config(
