@@ -2,222 +2,153 @@
 OTM Flex™
 Position Sizing Module
 
-Calculates position size and risk for defined-risk
-credit spreads.
+Calculates position size, maximum risk, maximum profit,
+and account-level risk for credit spreads.
 """
 
 
 # ============================================================
-# BASIC SPREAD CALCULATIONS
+# BASIC PROFIT / LOSS
 # ============================================================
 
-def calculate_max_profit(
-    credit: float,
-    contracts: int = 1,
-):
+def calculate_max_profit(credit, contracts=1):
     """
-    Calculate maximum potential profit.
+    Maximum profit for a credit spread.
 
     Credit is entered per share.
-
-    Example:
-        $1.00 credit
-        2 contracts
-
-        $1.00 × 100 × 2 = $200
+    One option contract controls 100 shares.
     """
-
-    return (
-        float(credit)
-        * 100
-        * int(contracts)
-    )
+    return float(credit) * 100 * int(contracts)
 
 
-def calculate_max_loss(
-    spread_width: float,
-    credit: float,
-    contracts: int = 1,
-):
+def calculate_max_loss(spread_width, credit, contracts=1):
     """
-    Calculate maximum theoretical loss.
-
-    Maximum loss per spread:
-
-        (Spread Width - Credit) × 100
+    Maximum possible loss for a credit spread.
     """
-
-    spread_width = float(
-        spread_width
-    )
-
-    credit = float(
-        credit
-    )
-
-    contracts = int(
-        contracts
-    )
-
     loss_per_contract = (
-        spread_width - credit
-    ) * 100
-
-    return (
-        loss_per_contract
-        * contracts
+        (float(spread_width) - float(credit)) * 100
     )
 
+    return max(0.0, loss_per_contract * int(contracts))
 
-def calculate_loss_per_contract(
-    spread_width: float,
-    credit: float,
-):
-    """
-    Calculate maximum theoretical loss
-    for one contract.
-    """
 
-    return (
-        float(spread_width)
-        - float(credit)
-    ) * 100
+def calculate_loss_per_contract(spread_width, credit):
+    """
+    Maximum loss for one spread contract.
+    """
+    return max(
+        0.0,
+        (float(spread_width) - float(credit)) * 100
+    )
 
 
 # ============================================================
 # ACCOUNT RISK
 # ============================================================
 
-def calculate_max_account_risk(
-    account_size: float,
-    risk_percent: float,
-):
+def calculate_max_account_risk(account_size, risk_percent):
     """
-    Calculate the maximum dollar amount
-    allowed to be at risk.
+    Maximum dollar amount allowed to be at risk.
     """
 
-    return (
-        float(account_size)
-        * (
-            float(risk_percent)
-            / 100
-        )
-    )
+    account_size = float(account_size)
+    risk_percent = float(risk_percent)
+
+    return account_size * (risk_percent / 100)
 
 
 # ============================================================
-# MAX CONTRACTS
+# CONTRACT COUNT
 # ============================================================
 
 def calculate_max_contracts(
-    account_size: float,
-    risk_percent: float,
-    spread_width: float,
-    credit: float,
+    account_size,
+    risk_percent,
+    spread_width,
+    credit
 ):
     """
-    Calculate the maximum number of contracts
-    that fit within the selected account-risk limit.
+    Calculate the maximum number of contracts allowed
+    by the selected account risk percentage.
     """
 
-    max_risk = calculate_max_account_risk(
+    allowed_risk = calculate_max_account_risk(
         account_size,
-        risk_percent,
+        risk_percent
     )
 
-    loss_per_contract = (
-        calculate_loss_per_contract(
-            spread_width,
-            credit,
-        )
+    loss_per_contract = calculate_loss_per_contract(
+        spread_width,
+        credit
     )
 
     if loss_per_contract <= 0:
         return 0
 
     return int(
-        max_risk
-        // loss_per_contract
+        allowed_risk // loss_per_contract
     )
 
 
 # ============================================================
-# TOTAL POSITION RISK
+# POSITION RISK
 # ============================================================
 
 def calculate_position_risk(
-    spread_width: float,
-    credit: float,
-    contracts: int,
+    spread_width,
+    credit,
+    contracts
 ):
     """
-    Calculate total theoretical maximum loss.
+    Calculate the maximum risk of the selected position.
     """
 
-    return calculate_max_loss(
+    loss_per_contract = calculate_loss_per_contract(
         spread_width,
-        credit,
-        contracts,
+        credit
     )
 
+    return loss_per_contract * int(contracts)
 
-# ============================================================
-# ACTUAL ACCOUNT RISK %
-# ============================================================
 
 def calculate_actual_risk_percent(
-    account_size: float,
-    position_risk: float,
+    account_size,
+    max_loss
 ):
     """
-    Calculate the percentage of the account
-    represented by maximum theoretical loss.
+    Calculate actual account risk percentage.
     """
+
+    account_size = float(account_size)
 
     if account_size <= 0:
         return 0.0
 
     return (
-        float(position_risk)
-        / float(account_size)
+        float(max_loss) / account_size
     ) * 100
 
 
-# ============================================================
-# POTENTIAL RETURN
-# ============================================================
-
 def calculate_return_on_risk(
-    credit: float,
-    spread_width: float,
+    credit,
+    spread_width
 ):
     """
-    Calculate maximum profit as a percentage
-    of maximum loss for one spread.
-
-    Example:
-
-        $1 credit
-        $5 spread
-
-        Max profit = $100
-        Max loss = $400
-
-        Return on risk = 25%
+    Maximum return on risk as a percentage.
     """
 
-    max_loss = (
-        float(spread_width)
-        - float(credit)
+    max_loss = calculate_loss_per_contract(
+        spread_width,
+        credit
     )
+
+    max_profit = float(credit) * 100
 
     if max_loss <= 0:
         return 0.0
 
     return (
-        float(credit)
-        / max_loss
+        max_profit / max_loss
     ) * 100
 
 
@@ -226,29 +157,18 @@ def calculate_return_on_risk(
 # ============================================================
 
 def calculate_profit_target(
-    credit: float,
-    target_percent: float = 50.0,
-    contracts: int = 1,
+    credit,
+    profit_target_percent=50
 ):
     """
-    Calculate the dollar profit at the selected
-    percentage of maximum credit.
-
-    Default:
-        50% profit target.
+    Dollar profit target based on the percentage of
+    maximum possible credit profit.
     """
 
-    maximum_profit = calculate_max_profit(
-        credit,
-        contracts,
-    )
+    max_profit = float(credit) * 100
 
-    return (
-        maximum_profit
-        * (
-            float(target_percent)
-            / 100
-        )
+    return max_profit * (
+        float(profit_target_percent) / 100
     )
 
 
@@ -257,52 +177,32 @@ def calculate_profit_target(
 # ============================================================
 
 def check_position_risk(
-    account_size: float,
-    risk_percent: float,
-    spread_width: float,
-    credit: float,
-    contracts: int,
+    account_size,
+    risk_percent,
+    spread_width,
+    credit,
+    contracts
 ):
     """
-    Determine whether a position is within
-    the selected account-risk limit.
+    Determine whether a position is within the
+    selected account risk limit.
     """
 
-    allowed_risk = (
-        calculate_max_account_risk(
-            account_size,
-            risk_percent,
-        )
+    allowed_risk = calculate_max_account_risk(
+        account_size,
+        risk_percent
     )
 
-    position_risk = (
-        calculate_position_risk(
-            spread_width,
-            credit,
-            contracts,
-        )
+    max_loss = calculate_position_risk(
+        spread_width,
+        credit,
+        contracts
     )
-
-    actual_risk_percent = (
-        calculate_actual_risk_percent(
-            account_size,
-            position_risk,
-        )
-    )
-
-    if position_risk <= allowed_risk:
-
-        status = "PASS"
-
-    else:
-
-        status = "FAIL"
 
     return {
-        "status": status,
         "allowed_risk": allowed_risk,
-        "position_risk": position_risk,
-        "actual_risk_percent": actual_risk_percent,
+        "max_loss": max_loss,
+        "within_risk_limit": max_loss <= allowed_risk,
     }
 
 
@@ -311,115 +211,134 @@ def check_position_risk(
 # ============================================================
 
 def analyze_position(
-    account_size: float,
-    risk_percent: float,
-    spread_width: float,
-    credit: float,
-    contracts: int,
-    profit_target_percent: float = 50.0,
+    account_size,
+    risk_percent,
+    spread_width,
+    credit,
+    contracts=None,
+    profit_target_percent=50
 ):
     """
     Complete position-sizing analysis.
+
+    Returns all keys expected by app.py.
     """
 
-    account_size = float(
-        account_size
-    )
+    account_size = float(account_size)
+    risk_percent = float(risk_percent)
+    spread_width = float(spread_width)
+    credit = float(credit)
 
-    risk_percent = float(
+    # Maximum dollar risk permitted by account settings.
+    allowed_risk = calculate_max_account_risk(
+        account_size,
         risk_percent
     )
 
-    spread_width = float(
-        spread_width
-    )
-
-    credit = float(
+    # Risk for one contract.
+    loss_per_contract = calculate_loss_per_contract(
+        spread_width,
         credit
     )
 
-    contracts = int(
+    # Maximum number of contracts allowed.
+    max_contracts = calculate_max_contracts(
+        account_size,
+        risk_percent,
+        spread_width,
+        credit
+    )
+
+    # If the user hasn't specified contracts,
+    # use the maximum allowed.
+    if contracts is None:
+        contracts = max_contracts
+
+    contracts = max(0, int(contracts))
+
+    # Position totals.
+    max_loss = calculate_max_loss(
+        spread_width,
+        credit,
         contracts
     )
 
-    max_allowed_risk = (
-        calculate_max_account_risk(
-            account_size,
-            risk_percent,
-        )
+    max_profit = calculate_max_profit(
+        credit,
+        contracts
     )
 
-    loss_per_contract = (
-        calculate_loss_per_contract(
-            spread_width,
-            credit,
-        )
+    actual_risk_percent = calculate_actual_risk_percent(
+        account_size,
+        max_loss
     )
 
-    maximum_loss = (
-        calculate_position_risk(
-            spread_width,
-            credit,
-            contracts,
-        )
+    return_on_risk = calculate_return_on_risk(
+        credit,
+        spread_width
     )
 
-    maximum_profit = (
-        calculate_max_profit(
-            credit,
-            contracts,
-        )
-    )
+    profit_target = calculate_profit_target(
+        credit,
+        profit_target_percent
+    ) * contracts
 
-    actual_risk_percent = (
-        calculate_actual_risk_percent(
-            account_size,
-            maximum_loss,
-        )
-    )
-
-    return_on_risk = (
-        calculate_return_on_risk(
-            credit,
-            spread_width,
-        )
-    )
-
-    profit_target = (
-        calculate_profit_target(
-            credit,
-            profit_target_percent,
-            contracts,
-        )
-    )
-
-    max_contracts = (
-        calculate_max_contracts(
-            account_size,
-            risk_percent,
-            spread_width,
-            credit,
-        )
-    )
-
-    within_risk_limit = (
-        maximum_loss
-        <= max_allowed_risk
-    )
+    within_risk_limit = max_loss <= allowed_risk
 
     return {
+        # Account
         "account_size": account_size,
         "risk_percent": risk_percent,
-        "max_allowed_risk": max_allowed_risk,
+
+        # Risk allowance
+        "allowed_risk": allowed_risk,
+
+        # Spread
         "spread_width": spread_width,
         "credit": credit,
+
+        # Contracts
         "contracts": contracts,
+        "max_contracts": max_contracts,
+
+        # Per-contract risk
         "loss_per_contract": loss_per_contract,
-        "maximum_loss": maximum_loss,
-        "maximum_profit": maximum_profit,
+
+        # Position totals
+        "max_loss": max_loss,
+        "max_profit": max_profit,
+
+        # Risk metrics
         "actual_risk_percent": actual_risk_percent,
         "return_on_risk": return_on_risk,
+
+        # Profit target
+        "profit_target_percent": profit_target_percent,
         "profit_target": profit_target,
-        "max_contracts": max_contracts,
+
+        # Risk check
         "within_risk_limit": within_risk_limit,
     }
+
+
+# ============================================================
+# ALIAS / COMPATIBILITY FUNCTIONS
+# ============================================================
+
+def calculate_position_size(
+    account_size,
+    risk_percent,
+    spread_width,
+    credit
+):
+    """
+    Compatibility helper returning the maximum
+    contract count.
+    """
+
+    return calculate_max_contracts(
+        account_size,
+        risk_percent,
+        spread_width,
+        credit
+    )
