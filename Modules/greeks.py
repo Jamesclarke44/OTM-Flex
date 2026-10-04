@@ -1,12 +1,13 @@
 """
 OTM Flex™
-Option Greeks Module
+Greeks Module
 
-Calculates option Greeks using the Black-Scholes model.
+Black-Scholes option pricing and Greeks calculations.
 
-Primary purpose:
-    Calculate reliable estimated Delta values for
-    selecting OTM Flex™ credit spread strikes.
+Also includes a practical delta estimator for Yahoo Finance
+option-chain data. When a market quote cannot produce a valid
+implied volatility, a fallback volatility is used for estimating
+delta so the scanner does not unnecessarily discard the option.
 """
 
 import math
@@ -17,109 +18,48 @@ import math
 # ============================================================
 
 def normal_pdf(x):
-    """
-    Standard normal probability density function.
-    """
-
-    return (
-        math.exp(-0.5 * x * x)
-        / math.sqrt(2 * math.pi)
-    )
+    """Standard normal probability density function."""
+    return math.exp(-0.5 * x * x) / math.sqrt(2 * math.pi)
 
 
 def normal_cdf(x):
-    """
-    Standard normal cumulative distribution function.
-    """
-
-    return (
-        0.5
-        * (
-            1
-            + math.erf(
-                x / math.sqrt(2)
-            )
-        )
-    )
+    """Standard normal cumulative distribution function."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
 # ============================================================
-# D1 / D2
+# BLACK-SCHOLES d1 / d2
 # ============================================================
 
-def calculate_d1(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
-):
-    """
-    Calculate Black-Scholes d1.
-    """
+def calculate_d1(S, K, T, r, sigma):
+    """Calculate Black-Scholes d1."""
 
-    if (
-        stock_price <= 0
-        or strike_price <= 0
-        or time_to_expiration <= 0
-        or volatility <= 0
-    ):
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
         return None
 
-    numerator = (
-        math.log(
-            stock_price / strike_price
-        )
-        + (
-            risk_free_rate
-            - dividend_yield
-            + 0.5 * volatility ** 2
-        )
-        * time_to_expiration
+    return (
+        math.log(S / K)
+        + (r + 0.5 * sigma ** 2) * T
+    ) / (
+        sigma * math.sqrt(T)
     )
 
-    denominator = (
-        volatility
-        * math.sqrt(
-            time_to_expiration
-        )
-    )
 
-    return numerator / denominator
-
-
-def calculate_d2(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
-):
-    """
-    Calculate Black-Scholes d2.
-    """
+def calculate_d2(S, K, T, r, sigma):
+    """Calculate Black-Scholes d2."""
 
     d1 = calculate_d1(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
+        S,
+        K,
+        T,
+        r,
+        sigma
     )
 
     if d1 is None:
         return None
 
-    return (
-        d1
-        - volatility
-        * math.sqrt(
-            time_to_expiration
-        )
-    )
+    return d1 - sigma * math.sqrt(T)
 
 
 # ============================================================
@@ -127,62 +67,42 @@ def calculate_d2(
 # ============================================================
 
 def calculate_delta(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    option_type,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+    S,
+    K,
+    T,
+    r,
+    sigma,
+    option_type="call"
 ):
     """
-    Calculate Black-Scholes Delta.
+    Calculate Black-Scholes delta.
 
-    Call:
-        0 to +1
-
-    Put:
-        -1 to 0
+    Returns:
+        Call delta: 0 to 1
+        Put delta: -1 to 0
     """
 
     d1 = calculate_d1(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
+        S,
+        K,
+        T,
+        r,
+        sigma
     )
 
     if d1 is None:
         return None
 
-    option_type = option_type.lower()
-
-    discount = math.exp(
-        -dividend_yield
-        * time_to_expiration
-    )
+    option_type = str(option_type).lower()
 
     if option_type == "call":
-
-        return (
-            discount
-            * normal_cdf(d1)
-        )
+        return normal_cdf(d1)
 
     if option_type == "put":
-
-        return (
-            discount
-            * (
-                normal_cdf(d1)
-                - 1
-            )
-        )
+        return normal_cdf(d1) - 1.0
 
     raise ValueError(
-        "option_type must be 'call' or 'put'."
+        "option_type must be 'call' or 'put'"
     )
 
 
@@ -191,41 +111,31 @@ def calculate_delta(
 # ============================================================
 
 def calculate_gamma(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+    S,
+    K,
+    T,
+    r,
+    sigma
 ):
-    """
-    Calculate Gamma.
-    """
+    """Calculate Black-Scholes gamma."""
 
     d1 = calculate_d1(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
+        S,
+        K,
+        T,
+        r,
+        sigma
     )
 
     if d1 is None:
         return None
 
     return (
-        math.exp(
-            -dividend_yield
-            * time_to_expiration
-        )
-        * normal_pdf(d1)
+        normal_pdf(d1)
         / (
-            stock_price
-            * volatility
-            * math.sqrt(
-                time_to_expiration
-            )
+            S
+            * sigma
+            * math.sqrt(T)
         )
     )
 
@@ -235,42 +145,30 @@ def calculate_gamma(
 # ============================================================
 
 def calculate_vega(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+    S,
+    K,
+    T,
+    r,
+    sigma
 ):
-    """
-    Calculate Vega.
-
-    Result represents the approximate option
-    price change for a 1.00 change in volatility.
-    """
+    """Calculate Black-Scholes vega."""
 
     d1 = calculate_d1(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
+        S,
+        K,
+        T,
+        r,
+        sigma
     )
 
     if d1 is None:
         return None
 
     return (
-        stock_price
-        * math.exp(
-            -dividend_yield
-            * time_to_expiration
-        )
+        S
         * normal_pdf(d1)
-        * math.sqrt(
-            time_to_expiration
-        )
+        * math.sqrt(T)
+        / 100.0
     )
 
 
@@ -279,256 +177,392 @@ def calculate_vega(
 # ============================================================
 
 def calculate_theta(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    option_type,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+    S,
+    K,
+    T,
+    r,
+    sigma,
+    option_type="call"
 ):
-    """
-    Calculate approximate daily Theta.
-    """
+    """Calculate approximate daily theta."""
 
     d1 = calculate_d1(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
+        S,
+        K,
+        T,
+        r,
+        sigma
     )
 
     d2 = calculate_d2(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
+        S,
+        K,
+        T,
+        r,
+        sigma
     )
 
     if d1 is None or d2 is None:
         return None
 
-    option_type = option_type.lower()
-
     first_term = (
         -(
-            stock_price
-            * math.exp(
-                -dividend_yield
-                * time_to_expiration
-            )
+            S
             * normal_pdf(d1)
-            * volatility
+            * sigma
         )
         / (
-            2
-            * math.sqrt(
-                time_to_expiration
-            )
+            2.0
+            * math.sqrt(T)
         )
     )
 
+    option_type = str(option_type).lower()
+
     if option_type == "call":
 
-        theta = (
-            first_term
-            - (
-                risk_free_rate
-                * strike_price
-                * math.exp(
-                    -risk_free_rate
-                    * time_to_expiration
-                )
-                * normal_cdf(d2)
-            )
-            + (
-                dividend_yield
-                * stock_price
-                * math.exp(
-                    -dividend_yield
-                    * time_to_expiration
-                )
-                * normal_cdf(d1)
-            )
+        second_term = (
+            -r
+            * K
+            * math.exp(-r * T)
+            * normal_cdf(d2)
         )
 
     elif option_type == "put":
 
-        theta = (
-            first_term
-            + (
-                risk_free_rate
-                * strike_price
-                * math.exp(
-                    -risk_free_rate
-                    * time_to_expiration
-                )
-                * normal_cdf(-d2)
-            )
-            - (
-                dividend_yield
-                * stock_price
-                * math.exp(
-                    -dividend_yield
-                    * time_to_expiration
-                )
-                * normal_cdf(-d1)
-            )
+        second_term = (
+            r
+            * K
+            * math.exp(-r * T)
+            * normal_cdf(-d2)
         )
 
     else:
 
         raise ValueError(
-            "option_type must be 'call' or 'put'."
+            "option_type must be 'call' or 'put'"
         )
 
-    # Convert annual theta to daily theta
-    return theta / 365
+    # Convert annual theta to daily theta.
+    return (
+        first_term + second_term
+    ) / 365.0
+
+
+# ============================================================
+# BLACK-SCHOLES PRICE
+# ============================================================
+
+def black_scholes_price(
+    S,
+    K,
+    T,
+    r,
+    sigma,
+    option_type="call"
+):
+    """Calculate theoretical Black-Scholes option price."""
+
+    d1 = calculate_d1(
+        S,
+        K,
+        T,
+        r,
+        sigma
+    )
+
+    d2 = calculate_d2(
+        S,
+        K,
+        T,
+        r,
+        sigma
+    )
+
+    if d1 is None or d2 is None:
+        return None
+
+    option_type = str(option_type).lower()
+
+    if option_type == "call":
+
+        price = (
+            S * normal_cdf(d1)
+            - K
+            * math.exp(-r * T)
+            * normal_cdf(d2)
+        )
+
+    elif option_type == "put":
+
+        price = (
+            K
+            * math.exp(-r * T)
+            * normal_cdf(-d2)
+            - S
+            * normal_cdf(-d1)
+        )
+
+    else:
+
+        raise ValueError(
+            "option_type must be 'call' or 'put'"
+        )
+
+    return max(
+        0.0,
+        price
+    )
 
 
 # ============================================================
 # IMPLIED VOLATILITY
 # ============================================================
 
-def black_scholes_price(
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    volatility,
-    option_type,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+def calculate_implied_volatility(
+    market_price,
+    S,
+    K,
+    T,
+    r,
+    option_type="call",
+    max_iterations=100
 ):
     """
-    Calculate theoretical Black-Scholes option price.
+    Calculate implied volatility using bisection.
+
+    Returns None when the option price is outside the
+    theoretical Black-Scholes range.
     """
 
-    d1 = calculate_d1(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
-    )
-
-    d2 = calculate_d2(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        volatility,
-        risk_free_rate,
-        dividend_yield,
-    )
-
-    if d1 is None or d2 is None:
+    if (
+        market_price is None
+        or S is None
+        or K is None
+        or T is None
+    ):
         return None
 
-    discount_r = math.exp(
-        -risk_free_rate
-        * time_to_expiration
+    if (
+        market_price <= 0
+        or S <= 0
+        or K <= 0
+        or T <= 0
+    ):
+        return None
+
+    option_type = str(
+        option_type
+    ).lower()
+
+    discounted_strike = (
+        K * math.exp(-r * T)
     )
 
-    discount_q = math.exp(
-        -dividend_yield
-        * time_to_expiration
-    )
-
-    option_type = option_type.lower()
+    # --------------------------------------------------------
+    # Theoretical price boundaries
+    # --------------------------------------------------------
 
     if option_type == "call":
 
-        return (
-            stock_price
-            * discount_q
-            * normal_cdf(d1)
-            - strike_price
-            * discount_r
-            * normal_cdf(d2)
+        minimum_price = max(
+            0.0,
+            S - discounted_strike
         )
 
-    if option_type == "put":
+        maximum_price = S
 
-        return (
-            strike_price
-            * discount_r
-            * normal_cdf(-d2)
-            - stock_price
-            * discount_q
-            * normal_cdf(-d1)
+    elif option_type == "put":
+
+        minimum_price = max(
+            0.0,
+            discounted_strike - S
         )
 
-    raise ValueError(
-        "option_type must be 'call' or 'put'."
-    )
+        maximum_price = discounted_strike
 
+    else:
 
-def calculate_implied_volatility(
-    market_price,
-    stock_price,
-    strike_price,
-    time_to_expiration,
-    option_type,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
-):
-    """
-    Estimate implied volatility using bisection.
-
-    Returns:
-        Decimal volatility.
-
-        Example:
-            0.25 = 25% IV
-    """
-
-    if market_price <= 0:
         return None
+
+    tolerance = 1e-8
+
+    if (
+        market_price
+        < minimum_price - tolerance
+    ):
+        return None
+
+    if (
+        market_price
+        > maximum_price + tolerance
+    ):
+        return None
+
+    # --------------------------------------------------------
+    # Search range
+    # --------------------------------------------------------
 
     low = 0.0001
     high = 5.0
 
-    for _ in range(100):
+    low_price = black_scholes_price(
+        S,
+        K,
+        T,
+        r,
+        low,
+        option_type
+    )
+
+    high_price = black_scholes_price(
+        S,
+        K,
+        T,
+        r,
+        high,
+        option_type
+    )
+
+    if low_price is None or high_price is None:
+        return None
+
+    # Essentially intrinsic value.
+    if abs(
+        market_price - low_price
+    ) < 1e-7:
+
+        return low
+
+    if market_price < low_price:
+        return None
+
+    if market_price > high_price:
+        return None
+
+    # --------------------------------------------------------
+    # Bisection
+    # --------------------------------------------------------
+
+    for _ in range(max_iterations):
 
         mid = (
             low + high
-        ) / 2
+        ) / 2.0
 
-        price = black_scholes_price(
-            stock_price,
-            strike_price,
-            time_to_expiration,
+        mid_price = black_scholes_price(
+            S,
+            K,
+            T,
+            r,
             mid,
-            option_type,
-            risk_free_rate,
-            dividend_yield,
+            option_type
         )
 
-        if price is None:
+        if mid_price is None:
             return None
 
         difference = (
-            price - market_price
+            mid_price - market_price
         )
 
-        if abs(difference) < 0.0001:
+        if abs(difference) < 1e-6:
             return mid
 
-        if price > market_price:
-
+        if difference > 0:
             high = mid
-
         else:
-
             low = mid
 
     return (
         low + high
-    ) / 2
+    ) / 2.0
+
+
+# ============================================================
+# DELTA FROM MARKET QUOTE
+# ============================================================
+
+def calculate_delta_from_quote(
+    market_price,
+    S,
+    K,
+    T,
+    r,
+    option_type="put",
+    fallback_volatility=0.30
+):
+    """
+    Estimate delta from an option's market price.
+
+    Process:
+
+    1. Try to calculate implied volatility from the quote.
+    2. If that fails, use fallback_volatility.
+    3. Calculate Black-Scholes delta.
+
+    The fallback is intentional because Yahoo Finance can provide
+    stale, crossed, or otherwise imperfect option quotes.
+    """
+
+    if (
+        market_price is None
+        or S is None
+        or K is None
+        or T is None
+    ):
+        return None
+
+    if (
+        market_price <= 0
+        or S <= 0
+        or K <= 0
+        or T <= 0
+    ):
+        return None
+
+    # --------------------------------------------------------
+    # Try actual implied volatility first.
+    # --------------------------------------------------------
+
+    volatility = calculate_implied_volatility(
+        market_price=market_price,
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        option_type=option_type
+    )
+
+    # --------------------------------------------------------
+    # Fallback volatility
+    # --------------------------------------------------------
+
+    if (
+        volatility is None
+        or volatility <= 0
+    ):
+
+        volatility = float(
+            fallback_volatility
+        )
+
+    # Safety check.
+    if volatility <= 0:
+        return None
+
+    # --------------------------------------------------------
+    # Calculate delta
+    # --------------------------------------------------------
+
+    return calculate_delta(
+        S=S,
+        K=K,
+        T=T,
+        r=r,
+        sigma=volatility,
+        option_type=option_type
+    )
 
 
 # ============================================================
@@ -536,213 +570,102 @@ def calculate_implied_volatility(
 # ============================================================
 
 def calculate_greeks(
-    stock_price,
-    strike_price,
-    dte,
-    market_price,
-    option_type,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+    S,
+    K,
+    T,
+    r,
+    sigma,
+    option_type="call"
 ):
-    """
-    Calculate IV and all major Greeks.
-
-    Returns a dictionary.
-    """
-
-    if dte <= 0:
-        return None
-
-    time_to_expiration = (
-        dte / 365
-    )
-
-    implied_volatility = (
-        calculate_implied_volatility(
-            market_price,
-            stock_price,
-            strike_price,
-            time_to_expiration,
-            option_type,
-            risk_free_rate,
-            dividend_yield,
-        )
-    )
-
-    if (
-        implied_volatility is None
-        or implied_volatility <= 0
-    ):
-        return None
-
-    delta = calculate_delta(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        implied_volatility,
-        option_type,
-        risk_free_rate,
-        dividend_yield,
-    )
-
-    gamma = calculate_gamma(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        implied_volatility,
-        risk_free_rate,
-        dividend_yield,
-    )
-
-    theta = calculate_theta(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        implied_volatility,
-        option_type,
-        risk_free_rate,
-        dividend_yield,
-    )
-
-    vega = calculate_vega(
-        stock_price,
-        strike_price,
-        time_to_expiration,
-        implied_volatility,
-        risk_free_rate,
-        dividend_yield,
-    )
+    """Return the major Black-Scholes Greeks."""
 
     return {
-        "iv": implied_volatility,
-        "delta": delta,
-        "gamma": gamma,
-        "theta": theta,
-        "vega": vega,
+        "delta": calculate_delta(
+            S,
+            K,
+            T,
+            r,
+            sigma,
+            option_type
+        ),
+
+        "gamma": calculate_gamma(
+            S,
+            K,
+            T,
+            r,
+            sigma
+        ),
+
+        "vega": calculate_vega(
+            S,
+            K,
+            T,
+            r,
+            sigma
+        ),
+
+        "theta": calculate_theta(
+            S,
+            K,
+            T,
+            r,
+            sigma,
+            option_type
+        ),
     }
 
 
 # ============================================================
-# FIND STRIKE BY TARGET DELTA
+# FIND STRIKE BY DELTA
 # ============================================================
 
 def find_strike_by_delta(
-    options,
-    stock_price,
-    dte,
-    option_type,
-    target_delta=0.14,
-    risk_free_rate=0.04,
-    dividend_yield=0.0,
+    S,
+    strikes,
+    T,
+    r,
+    sigma,
+    target_delta,
+    option_type="put"
 ):
     """
-    Find the option strike whose calculated delta is
-    closest to the target delta.
-
-    'options' should be a DataFrame containing:
-
-        strike
-        bid
-        ask
-
-    Returns:
-        Dictionary containing strike and Greeks.
+    Find the strike with delta closest to target_delta.
     """
 
-    if options is None or options.empty:
+    if strikes is None:
         return None
 
-    best_option = None
-    smallest_difference = float("inf")
+    best_strike = None
+    best_difference = float("inf")
 
-    for _, option in options.iterrows():
-
-        strike = option.get(
-            "strike"
-        )
-
-        bid = option.get(
-            "bid",
-            0
-        )
-
-        ask = option.get(
-            "ask",
-            0
-        )
-
-        if strike is None:
-            continue
+    for strike in strikes:
 
         try:
-
             strike = float(strike)
-            bid = float(bid)
-            ask = float(ask)
-
-        except (
-            TypeError,
-            ValueError,
-        ):
-
+        except (TypeError, ValueError):
             continue
 
-        if strike <= 0:
-            continue
-
-        # Use midpoint when possible
-        if bid > 0 and ask > 0:
-
-            market_price = (
-                bid + ask
-            ) / 2
-
-        elif bid > 0:
-
-            market_price = bid
-
-        elif ask > 0:
-
-            market_price = ask
-
-        else:
-
-            continue
-
-        greeks = calculate_greeks(
-            stock_price=stock_price,
-            strike_price=strike,
-            dte=dte,
-            market_price=market_price,
-            option_type=option_type,
-            risk_free_rate=risk_free_rate,
-            dividend_yield=dividend_yield,
+        delta = calculate_delta(
+            S=S,
+            K=strike,
+            T=T,
+            r=r,
+            sigma=sigma,
+            option_type=option_type
         )
 
-        if greeks is None:
+        if delta is None:
             continue
-
-        delta = greeks["delta"]
 
         difference = abs(
             abs(delta)
-            - abs(target_delta)
+            - abs(float(target_delta))
         )
 
-        if difference < smallest_difference:
+        if difference < best_difference:
 
-            smallest_difference = difference
+            best_difference = difference
+            best_strike = strike
 
-            best_option = {
-                "strike": strike,
-                "bid": bid,
-                "ask": ask,
-                "mid": market_price,
-                "delta": delta,
-                "iv": greeks["iv"],
-                "gamma": greeks["gamma"],
-                "theta": greeks["theta"],
-                "vega": greeks["vega"],
-            }
-
-    return best_option
+    return best_strike
