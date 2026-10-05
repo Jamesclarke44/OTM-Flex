@@ -3,12 +3,11 @@ OTM Flex™
 Options Scanner
 
 Scans SPY, QQQ, IWM, and VOO for Bull Put and Bear Call
-credit-spread candidates using the OTM Flex™ rule book.
+credit spread candidates.
 """
 
 import math
 import pandas as pd
-import yfinance as yf
 
 from Modules.market_data import (
     get_current_price,
@@ -16,7 +15,6 @@ from Modules.market_data import (
 )
 
 from Modules.indicators import (
-    calculate_indicators,
     get_latest_indicators,
     determine_trend,
 )
@@ -43,10 +41,6 @@ from Modules.position_sizing import (
 )
 
 
-# ============================================================
-# DEFAULT SETTINGS
-# ============================================================
-
 DEFAULT_TARGET_DELTA = 0.14
 DEFAULT_SPREAD_WIDTH = 5.0
 DEFAULT_MIN_DTE = 7
@@ -56,52 +50,41 @@ DEFAULT_FALLBACK_IV = 0.30
 
 
 # ============================================================
-# SAFE CONVERSION
+# HELPERS
 # ============================================================
 
 def safe_float(value, default=None):
-    """Safely convert a value to float."""
 
     try:
 
-        if value is None:
+        if value is None or pd.isna(value):
             return default
 
-        if pd.isna(value):
+        value = float(value)
+
+        if not math.isfinite(value):
             return default
 
-        result = float(value)
-
-        if not math.isfinite(result):
-            return default
-
-        return result
+        return value
 
     except (TypeError, ValueError):
+
         return default
 
 
-# ============================================================
-# MID PRICE
-# ============================================================
-
 def calculate_mid_price(row):
-    """
-    Calculate a usable option mid price.
-
-    Priority:
-    1. Bid/ask midpoint
-    2. Last price
-    """
 
     bid = safe_float(row.get("bid"))
     ask = safe_float(row.get("ask"))
     last = safe_float(row.get("lastPrice"))
 
-    if bid is not None and ask is not None:
-
-        if bid >= 0 and ask > 0 and ask >= bid:
-            return (bid + ask) / 2
+    if (
+        bid is not None
+        and ask is not None
+        and ask >= bid
+        and ask > 0
+    ):
+        return (bid + ask) / 2
 
     if last is not None and last > 0:
         return last
@@ -109,384 +92,7 @@ def calculate_mid_price(row):
     return None
 
 
-# ============================================================
-# OPTION ROW
-# ============================================================
-
-def get_option_row(data, strike):
-    """Return the row closest to a requested strike."""
-
-    if data is None or data.empty:
-        return None
-
-    strikes = pd.to_numeric(
-        data["strike"],
-        errors="coerce"
-    )
-
-    if strikes.isna().all():
-        return None
-
-    index = (
-        (strikes - float(strike))
-        .abs()
-        .idxmin()
-    )
-
-    return data.loc[index]
-
-
-# ============================================================
-# DELTA CALCULATION
-# ============================================================
-
-def calculate_option_delta(
-    row,
-    current_price,
-    expiration,
-    risk_free_rate,
-    option_type,
-    fallback_iv=DEFAULT_FALLBACK_IV,
-):
-    """
-    Calculate option delta.
-
-    Uses Yahoo delta if available.
-
-    Otherwise estimates delta from the option quote.
-    """
-
-    # --------------------------------------------------------
-    # First: use Yahoo-provided delta if available.
-    # --------------------------------------------------------
-
-    for column in [
-        "delta",
-        "Delta",
-        "DELTA",
-    ]:
-
-        if column in row.index:
-
-            value = safe_float(row[column])
-
-            if value is not None:
-
-                return value
-
-    # --------------------------------------------------------
-    # Strike
-    # --------------------------------------------------------
-
-    strike = safe_float(row.get("strike"))
-
-    if strike is None or current_price is None:
-        return None
-
-    # --------------------------------------------------------
-    # Option price
-    # --------------------------------------------------------
-
-    option_price = calculate_mid_price(row)
-
-    if option_price is None or option_price <= 0:
-        return None
-
-    # --------------------------------------------------------
-    # Time to expiration
-    # --------------------------------------------------------
-
-    try:
-        dte = calculate_dte(expiration)
-
-        if dte is None:
-            return None
-
-        dte = float(dte)
-
-    except Exception:
-        return None
-
-    if dte <= 0:
-        return None
-
-    T = dte / 365.0
-
-    # --------------------------------------------------------
-    # Delta
-    # --------------------------------------------------------
-
-    delta = calculate_delta_from_quote(
-        market_price=option_price,
-        S=current_price,
-        K=strike,
-        T=T,
-        r=risk_free_rate,
-        option_type=option_type,
-        fallback_volatility=fallback_iv,
-    )
-
-    return safe_float(delta)
-
-
-# ============================================================
-# SELECT SHORT OPTION
-# ============================================================
-
-def select_short_option_by_delta(
-    data,
-    current_price,
-    expiration,
-    target_delta,
-    risk_free_rate,
-    option_type,
-    fallback_iv=DEFAULT_FALLBACK_IV,
-):
-    """
-    Select the option with delta closest to the requested
-    OTM Flex target.
-
-    Returns:
-        row
-        delta
-        statistics
-    """
-
-    if data is None or data.empty:
-        return None, None, {
-            "rows": 0,
-            "usable_prices": 0,
-            "delta_estimates": 0,
-            "target_matches": 0,
-        }
-
-    candidates = []
-
-    usable_prices = 0
-    delta_estimates = 0
-    target_matches = 0
-
-    for _, row in data.iterrows():
-
-        strike = safe_float(row.get("strike"))
-
-        if strike is None:
-            continue
-
-        # ----------------------------------------------------
-        # Ensure the option is OTM.
-        # ----------------------------------------------------
-
-        if option_type == "put":
-
-            if strike >= current_price:
-                continue
-
-        elif option_type == "call":
-
-            if strike <= current_price:
-                continue
-
-        # ----------------------------------------------------
-        # Price
-        # ----------------------------------------------------
-
-        price = calculate_mid_price(row)
-
-        if price is None or price <= 0:
-            continue
-
-        usable_prices += 1
-
-        # ----------------------------------------------------
-        # Delta
-        # ----------------------------------------------------
-
-        delta = calculate_option_delta(
-            row=row,
-            current_price=current_price,
-            expiration=expiration,
-            risk_free_rate=risk_free_rate,
-            option_type=option_type,
-            fallback_iv=fallback_iv,
-        )
-
-        if delta is None:
-            continue
-
-        delta_estimates += 1
-
-        absolute_delta = abs(delta)
-
-        # ----------------------------------------------------
-        # Target delta range
-        # ----------------------------------------------------
-
-        if 0.10 <= absolute_delta <= 0.18:
-            target_matches += 1
-
-        # We still keep candidates outside the range.
-        # The rule checker will classify them.
-        difference = abs(
-            absolute_delta - target_delta
-        )
-
-        candidates.append(
-            {
-                "row": row,
-                "delta": delta,
-                "difference": difference,
-                "strike": strike,
-            }
-        )
-
-    stats = {
-        "rows": len(data),
-        "usable_prices": usable_prices,
-        "delta_estimates": delta_estimates,
-        "target_matches": target_matches,
-    }
-
-    if not candidates:
-        return None, None, stats
-
-    # Closest to target delta.
-    candidates.sort(
-        key=lambda x: x["difference"]
-    )
-
-    selected = candidates[0]
-
-    return (
-        selected["row"],
-        selected["delta"],
-        stats,
-    )
-
-
-# ============================================================
-# LONG LEG
-# ============================================================
-
-def find_long_put(
-    puts,
-    short_strike,
-    spread_width,
-):
-    """Find the long put at approximately the desired width."""
-
-    target = short_strike - spread_width
-
-    if puts is None or puts.empty:
-        return None
-
-    candidates = puts[
-        puts["strike"] < short_strike
-    ].copy()
-
-    if candidates.empty:
-        return None
-
-    candidates["distance"] = (
-        candidates["strike"] - target
-    ).abs()
-
-    candidates = candidates.sort_values(
-        "distance"
-    )
-
-    return candidates.iloc[0]
-
-
-def find_long_call(
-    calls,
-    short_strike,
-    spread_width,
-):
-    """Find the long call at approximately the desired width."""
-
-    target = short_strike + spread_width
-
-    if calls is None or calls.empty:
-        return None
-
-    candidates = calls[
-        calls["strike"] > short_strike
-    ].copy()
-
-    if candidates.empty:
-        return None
-
-    candidates["distance"] = (
-        candidates["strike"] - target
-    ).abs()
-
-    candidates = candidates.sort_values(
-        "distance"
-    )
-
-    return candidates.iloc[0]
-
-
-# ============================================================
-# LIQUIDITY
-# ============================================================
-
-def calculate_liquidity(short_row, long_row):
-    """
-    Calculate approximate combined bid/ask width.
-    """
-
-    short_bid = safe_float(short_row.get("bid"), 0)
-    short_ask = safe_float(short_row.get("ask"), 0)
-
-    long_bid = safe_float(long_row.get("bid"), 0)
-    long_ask = safe_float(long_row.get("ask"), 0)
-
-    short_mid = calculate_mid_price(short_row)
-    long_mid = calculate_mid_price(long_row)
-
-    if short_mid is None or long_mid is None:
-        return {
-            "bid": None,
-            "ask": None,
-            "mid": None,
-            "spread_pct": None,
-        }
-
-    spread_bid = short_bid - long_ask
-    spread_ask = short_ask - long_bid
-
-    spread_mid = (
-        short_mid - long_mid
-    )
-
-    if spread_mid <= 0:
-        spread_pct = None
-    else:
-        spread_width = max(
-            0,
-            spread_ask - spread_bid
-        )
-
-        spread_pct = (
-            spread_width / spread_mid
-        ) * 100
-
-    return {
-        "bid": spread_bid,
-        "ask": spread_ask,
-        "mid": spread_mid,
-        "spread_pct": spread_pct,
-    }
-
-
-# ============================================================
-# SUPPORT / RESISTANCE
-# ============================================================
-
 def calculate_support_resistance(data):
-    """Calculate simple 20-day support and resistance."""
 
     if data is None or data.empty:
         return None, None
@@ -504,17 +110,12 @@ def calculate_support_resistance(data):
     return support, resistance
 
 
-# ============================================================
-# ATR DISTANCE
-# ============================================================
-
 def calculate_atr_distance(
     current_price,
     short_strike,
     atr,
     spread_type,
 ):
-    """Calculate distance between price and short strike in ATRs."""
 
     if (
         current_price is None
@@ -540,7 +141,313 @@ def calculate_atr_distance(
 
 
 # ============================================================
-# CANDIDATE BUILDER
+# DELTA
+# ============================================================
+
+def calculate_option_delta(
+    row,
+    current_price,
+    expiration,
+    risk_free_rate,
+    option_type,
+    fallback_iv=DEFAULT_FALLBACK_IV,
+):
+
+    strike = safe_float(
+        row.get("strike")
+    )
+
+    if strike is None:
+        return None
+
+    price = calculate_mid_price(row)
+
+    if price is None or price <= 0:
+        return None
+
+    try:
+
+        dte = calculate_dte(
+            expiration
+        )
+
+    except Exception:
+
+        return None
+
+    if dte is None or dte <= 0:
+        return None
+
+    T = float(dte) / 365.0
+
+    return calculate_delta_from_quote(
+        market_price=price,
+        S=current_price,
+        K=strike,
+        T=T,
+        r=risk_free_rate,
+        option_type=option_type,
+        fallback_volatility=fallback_iv,
+    )
+
+
+# ============================================================
+# SHORT OPTION SELECTION
+# ============================================================
+
+def select_short_option_by_delta(
+    data,
+    current_price,
+    expiration,
+    target_delta,
+    risk_free_rate,
+    option_type,
+    fallback_iv=DEFAULT_FALLBACK_IV,
+):
+
+    stats = {
+        "rows": 0,
+        "usable_prices": 0,
+        "delta_estimates": 0,
+        "target_matches": 0,
+    }
+
+    if data is None or data.empty:
+
+        return None, None, stats
+
+    stats["rows"] = len(data)
+
+    candidates = []
+
+    for _, row in data.iterrows():
+
+        strike = safe_float(
+            row.get("strike")
+        )
+
+        if strike is None:
+            continue
+
+        # Only consider OTM options.
+        if option_type == "put":
+
+            if strike >= current_price:
+                continue
+
+        else:
+
+            if strike <= current_price:
+                continue
+
+        price = calculate_mid_price(row)
+
+        if price is None or price <= 0:
+            continue
+
+        stats["usable_prices"] += 1
+
+        delta = calculate_option_delta(
+            row=row,
+            current_price=current_price,
+            expiration=expiration,
+            risk_free_rate=risk_free_rate,
+            option_type=option_type,
+            fallback_iv=fallback_iv,
+        )
+
+        if delta is None:
+            continue
+
+        stats["delta_estimates"] += 1
+
+        absolute_delta = abs(delta)
+
+        if (
+            0.10
+            <= absolute_delta
+            <= 0.18
+        ):
+            stats["target_matches"] += 1
+
+        candidates.append(
+            {
+                "row": row,
+                "delta": delta,
+                "difference": abs(
+                    absolute_delta
+                    - target_delta
+                ),
+            }
+        )
+
+    if not candidates:
+
+        return None, None, stats
+
+    candidates.sort(
+        key=lambda x: x["difference"]
+    )
+
+    selected = candidates[0]
+
+    return (
+        selected["row"],
+        selected["delta"],
+        stats,
+    )
+
+
+# ============================================================
+# LONG LEGS
+# ============================================================
+
+def find_long_put(
+    puts,
+    short_strike,
+    spread_width,
+):
+
+    if puts is None or puts.empty:
+        return None
+
+    candidates = puts[
+        puts["strike"] < short_strike
+    ].copy()
+
+    if candidates.empty:
+        return None
+
+    target = (
+        short_strike
+        - spread_width
+    )
+
+    candidates["distance"] = (
+        candidates["strike"]
+        - target
+    ).abs()
+
+    return candidates.sort_values(
+        "distance"
+    ).iloc[0]
+
+
+def find_long_call(
+    calls,
+    short_strike,
+    spread_width,
+):
+
+    if calls is None or calls.empty:
+        return None
+
+    candidates = calls[
+        calls["strike"] > short_strike
+    ].copy()
+
+    if candidates.empty:
+        return None
+
+    target = (
+        short_strike
+        + spread_width
+    )
+
+    candidates["distance"] = (
+        candidates["strike"]
+        - target
+    ).abs()
+
+    return candidates.sort_values(
+        "distance"
+    ).iloc[0]
+
+
+# ============================================================
+# LIQUIDITY
+# ============================================================
+
+def calculate_liquidity(
+    short_row,
+    long_row,
+):
+
+    short_bid = safe_float(
+        short_row.get("bid"),
+        0
+    )
+
+    short_ask = safe_float(
+        short_row.get("ask"),
+        0
+    )
+
+    long_bid = safe_float(
+        long_row.get("bid"),
+        0
+    )
+
+    long_ask = safe_float(
+        long_row.get("ask"),
+        0
+    )
+
+    short_mid = calculate_mid_price(
+        short_row
+    )
+
+    long_mid = calculate_mid_price(
+        long_row
+    )
+
+    if short_mid is None or long_mid is None:
+
+        return {
+            "bid": None,
+            "ask": None,
+            "mid": None,
+            "spread_pct": None,
+        }
+
+    spread_bid = (
+        short_bid - long_ask
+    )
+
+    spread_ask = (
+        short_ask - long_bid
+    )
+
+    spread_mid = (
+        short_mid - long_mid
+    )
+
+    if spread_mid > 0:
+
+        spread_width = max(
+            0,
+            spread_ask - spread_bid
+        )
+
+        spread_pct = (
+            spread_width
+            / spread_mid
+        ) * 100
+
+    else:
+
+        spread_pct = None
+
+    return {
+        "bid": spread_bid,
+        "ask": spread_ask,
+        "mid": spread_mid,
+        "spread_pct": spread_pct,
+    }
+
+
+# ============================================================
+# BUILD CANDIDATE
 # ============================================================
 
 def build_candidate(
@@ -554,10 +461,7 @@ def build_candidate(
     indicators,
     support,
     resistance,
-    spread_width,
-    risk_free_rate,
 ):
-    """Build a complete spread candidate."""
 
     if short_row is None or long_row is None:
         return None
@@ -586,28 +490,18 @@ def build_candidate(
     ):
         return None
 
-    # --------------------------------------------------------
-    # Credit
-    # --------------------------------------------------------
-
     credit = (
-        short_mid - long_mid
+        short_mid
+        - long_mid
     )
 
     if credit <= 0:
         return None
 
-    # --------------------------------------------------------
-    # Actual width
-    # --------------------------------------------------------
-
     actual_width = abs(
-        short_strike - long_strike
+        short_strike
+        - long_strike
     )
-
-    # --------------------------------------------------------
-    # Max profit/loss
-    # --------------------------------------------------------
 
     max_profit = calculate_max_profit(
         credit,
@@ -620,54 +514,42 @@ def build_candidate(
         1
     )
 
-    # --------------------------------------------------------
-    # DTE
-    # --------------------------------------------------------
-
     dte = calculate_dte(
         expiration
     )
 
-    # --------------------------------------------------------
-    # ATR
-    # --------------------------------------------------------
-
-    atr = indicators.get("atr")
-
-    atr_distance = calculate_atr_distance(
-        current_price=current_price,
-        short_strike=short_strike,
-        atr=atr,
-        spread_type=spread_type,
+    atr = indicators.get(
+        "atr"
     )
 
-    # --------------------------------------------------------
-    # Market condition
-    # --------------------------------------------------------
+    atr_distance = calculate_atr_distance(
+        current_price,
+        short_strike,
+        atr,
+        spread_type,
+    )
 
     trend = determine_trend(
         indicators
     )
 
-    if trend in ["Bullish", "Bearish"]:
-        market_condition = "strong"
-    else:
-        market_condition = "choppy"
+    if trend in (
+        "Bullish",
+        "Bearish",
+    ):
 
-    # --------------------------------------------------------
-    # Liquidity
-    # --------------------------------------------------------
+        market_condition = "strong"
+
+    else:
+
+        market_condition = "choppy"
 
     liquidity = calculate_liquidity(
         short_row,
         long_row
     )
 
-    # --------------------------------------------------------
-    # Rule evaluation
-    # --------------------------------------------------------
-
-    rule_results = evaluate_trade(
+    rules = evaluate_trade(
         spread_type=spread_type,
         trend=trend,
         delta=abs(short_delta),
@@ -676,14 +558,20 @@ def build_candidate(
         market_condition=market_condition,
         rsi=indicators.get("rsi"),
         macd=indicators.get("macd"),
-        macd_signal=indicators.get("macd_signal"),
+        macd_signal=indicators.get(
+            "macd_signal"
+        ),
         bid=liquidity["bid"],
         ask=liquidity["ask"],
         open_interest=safe_float(
-            short_row.get("openInterest")
+            short_row.get(
+                "openInterest"
+            )
         ),
         volume=safe_float(
-            short_row.get("volume")
+            short_row.get(
+                "volume"
+            )
         ),
         current_price=current_price,
         short_strike=short_strike,
@@ -691,81 +579,41 @@ def build_candidate(
         resistance=resistance,
     )
 
-    overall_status = get_overall_status(
-        rule_results
-    )
-
     return {
         "ticker": ticker,
         "spread_type": spread_type,
         "expiration": expiration,
         "dte": dte,
-
         "current_price": current_price,
-
         "short_strike": short_strike,
         "long_strike": long_strike,
-
         "short_delta": abs(short_delta),
-
-        "short_bid": safe_float(
-            short_row.get("bid")
-        ),
-
-        "short_ask": safe_float(
-            short_row.get("ask")
-        ),
-
-        "short_mid": short_mid,
-
-        "long_bid": safe_float(
-            long_row.get("bid")
-        ),
-
-        "long_ask": safe_float(
-            long_row.get("ask")
-        ),
-
-        "long_mid": long_mid,
-
         "credit": credit,
-
         "spread_width": actual_width,
-
         "max_profit": max_profit,
-
         "max_loss": max_loss,
-
         "atr": atr,
-
         "atr_distance": atr_distance,
-
         "rsi": indicators.get("rsi"),
-
         "macd": indicators.get("macd"),
-
         "macd_signal": indicators.get(
             "macd_signal"
         ),
-
         "support": support,
-
         "resistance": resistance,
-
         "trend": trend,
-
         "liquidity_spread_pct": liquidity[
             "spread_pct"
         ],
-
-        "status": overall_status,
-
-        "rules": rule_results,
+        "status": get_overall_status(
+            rules
+        ),
+        "rules": rules,
     }
 
 
 # ============================================================
-# EXPIRATION SCANNER
+# EXPIRATION
 # ============================================================
 
 def scan_expiration(
@@ -773,7 +621,6 @@ def scan_expiration(
     expiration,
     current_price,
     indicators,
-    trend,
     support,
     resistance,
     target_delta=DEFAULT_TARGET_DELTA,
@@ -781,32 +628,17 @@ def scan_expiration(
     risk_free_rate=DEFAULT_RISK_FREE_RATE,
     fallback_iv=DEFAULT_FALLBACK_IV,
 ):
-    """
-    Scan one expiration for Bull Put and Bear Call spreads.
-
-    Returns:
-        candidates
-        diagnostics
-    """
-
-    diagnostics = {
-        "expiration": expiration,
-        "calls": 0,
-        "puts": 0,
-        "put_price_candidates": 0,
-        "call_price_candidates": 0,
-        "put_delta_estimates": 0,
-        "call_delta_estimates": 0,
-        "put_target_matches": 0,
-        "call_target_matches": 0,
-        "spreads_built": 0,
-    }
 
     candidates = []
 
-    # --------------------------------------------------------
-    # Get option chain
-    # --------------------------------------------------------
+    diagnostics = {
+        "calls": 0,
+        "puts": 0,
+        "delta_estimates": 0,
+        "target_matches": 0,
+        "spreads_built": 0,
+        "error": None,
+    }
 
     try:
 
@@ -821,182 +653,148 @@ def scan_expiration(
 
         return candidates, diagnostics
 
-    # --------------------------------------------------------
-    # Clean data
-    # --------------------------------------------------------
-
     try:
-
         calls = clean_option_data(
             calls
         )
-
     except Exception:
-
         calls = pd.DataFrame()
 
     try:
-
         puts = clean_option_data(
             puts
         )
-
     except Exception:
-
         puts = pd.DataFrame()
 
     diagnostics["calls"] = len(calls)
     diagnostics["puts"] = len(puts)
 
-    # ========================================================
-    # BULL PUT
-    # ========================================================
+    # --------------------------------------------------------
+    # Bull Put
+    # --------------------------------------------------------
 
-    if not puts.empty:
-
-        short_put, put_delta, put_stats = (
-            select_short_option_by_delta(
-                data=puts,
-                current_price=current_price,
-                expiration=expiration,
-                target_delta=target_delta,
-                risk_free_rate=risk_free_rate,
-                option_type="put",
-                fallback_iv=fallback_iv,
-            )
+    short_put, put_delta, put_stats = (
+        select_short_option_by_delta(
+            puts,
+            current_price,
+            expiration,
+            target_delta,
+            risk_free_rate,
+            "put",
+            fallback_iv,
         )
+    )
 
-        diagnostics[
-            "put_price_candidates"
-        ] = put_stats["usable_prices"]
+    diagnostics["delta_estimates"] += (
+        put_stats["delta_estimates"]
+    )
 
-        diagnostics[
-            "put_delta_estimates"
-        ] = put_stats["delta_estimates"]
+    diagnostics["target_matches"] += (
+        put_stats["target_matches"]
+    )
 
-        diagnostics[
-            "put_target_matches"
-        ] = put_stats["target_matches"]
+    if (
+        short_put is not None
+        and put_delta is not None
+    ):
 
-        if (
-            short_put is not None
-            and put_delta is not None
-        ):
-
-            short_strike = safe_float(
+        long_put = find_long_put(
+            puts,
+            safe_float(
                 short_put.get("strike")
-            )
-
-            long_put = find_long_put(
-                puts,
-                short_strike,
-                spread_width
-            )
-
-            if long_put is not None:
-
-                candidate = build_candidate(
-                    ticker=ticker,
-                    current_price=current_price,
-                    expiration=expiration,
-                    spread_type="Bull Put",
-                    short_row=short_put,
-                    short_delta=put_delta,
-                    long_row=long_put,
-                    indicators=indicators,
-                    support=support,
-                    resistance=resistance,
-                    spread_width=spread_width,
-                    risk_free_rate=risk_free_rate,
-                )
-
-                if candidate is not None:
-
-                    candidates.append(
-                        candidate
-                    )
-
-                    diagnostics[
-                        "spreads_built"
-                    ] += 1
-
-    # ========================================================
-    # BEAR CALL
-    # ========================================================
-
-    if not calls.empty:
-
-        short_call, call_delta, call_stats = (
-            select_short_option_by_delta(
-                data=calls,
-                current_price=current_price,
-                expiration=expiration,
-                target_delta=target_delta,
-                risk_free_rate=risk_free_rate,
-                option_type="call",
-                fallback_iv=fallback_iv,
-            )
+            ),
+            spread_width,
         )
 
-        diagnostics[
-            "call_price_candidates"
-        ] = call_stats["usable_prices"]
+        candidate = build_candidate(
+            ticker,
+            current_price,
+            expiration,
+            "Bull Put",
+            short_put,
+            put_delta,
+            long_put,
+            indicators,
+            support,
+            resistance,
+        )
 
-        diagnostics[
-            "call_delta_estimates"
-        ] = call_stats["delta_estimates"]
+        if candidate:
 
-        diagnostics[
-            "call_target_matches"
-        ] = call_stats["target_matches"]
+            candidates.append(
+                candidate
+            )
 
-        if (
-            short_call is not None
-            and call_delta is not None
-        ):
+            diagnostics[
+                "spreads_built"
+            ] += 1
 
-            short_strike = safe_float(
+    # --------------------------------------------------------
+    # Bear Call
+    # --------------------------------------------------------
+
+    short_call, call_delta, call_stats = (
+        select_short_option_by_delta(
+            calls,
+            current_price,
+            expiration,
+            target_delta,
+            risk_free_rate,
+            "call",
+            fallback_iv,
+        )
+    )
+
+    diagnostics["delta_estimates"] += (
+        call_stats["delta_estimates"]
+    )
+
+    diagnostics["target_matches"] += (
+        call_stats["target_matches"]
+    )
+
+    if (
+        short_call is not None
+        and call_delta is not None
+    ):
+
+        long_call = find_long_call(
+            calls,
+            safe_float(
                 short_call.get("strike")
+            ),
+            spread_width,
+        )
+
+        candidate = build_candidate(
+            ticker,
+            current_price,
+            expiration,
+            "Bear Call",
+            short_call,
+            call_delta,
+            long_call,
+            indicators,
+            support,
+            resistance,
+        )
+
+        if candidate:
+
+            candidates.append(
+                candidate
             )
 
-            long_call = find_long_call(
-                calls,
-                short_strike,
-                spread_width
-            )
-
-            if long_call is not None:
-
-                candidate = build_candidate(
-                    ticker=ticker,
-                    current_price=current_price,
-                    expiration=expiration,
-                    spread_type="Bear Call",
-                    short_row=short_call,
-                    short_delta=call_delta,
-                    long_row=long_call,
-                    indicators=indicators,
-                    support=support,
-                    resistance=resistance,
-                    spread_width=spread_width,
-                    risk_free_rate=risk_free_rate,
-                )
-
-                if candidate is not None:
-
-                    candidates.append(
-                        candidate
-                    )
-
-                    diagnostics[
-                        "spreads_built"
-                    ] += 1
+            diagnostics[
+                "spreads_built"
+            ] += 1
 
     return candidates, diagnostics
 
 
 # ============================================================
-# TICKER SCANNER
+# TICKER
 # ============================================================
 
 def scan_ticker(
@@ -1008,9 +806,6 @@ def scan_ticker(
     risk_free_rate=DEFAULT_RISK_FREE_RATE,
     fallback_iv=DEFAULT_FALLBACK_IV,
 ):
-    """
-    Scan one underlying.
-    """
 
     candidates = []
 
@@ -1019,17 +814,12 @@ def scan_ticker(
         "current_price": None,
         "trend": None,
         "expirations": 0,
-        "expiration_scans": 0,
         "option_rows": 0,
         "delta_estimates": 0,
         "target_matches": 0,
         "spreads_built": 0,
         "errors": [],
     }
-
-    # --------------------------------------------------------
-    # Current price
-    # --------------------------------------------------------
 
     current_price = get_current_price(
         ticker
@@ -1038,7 +828,7 @@ def scan_ticker(
     if current_price is None:
 
         diagnostics["errors"].append(
-            "Could not retrieve current price."
+            "No current price."
         )
 
         return candidates, diagnostics
@@ -1046,10 +836,6 @@ def scan_ticker(
     diagnostics[
         "current_price"
     ] = current_price
-
-    # --------------------------------------------------------
-    # Historical data
-    # --------------------------------------------------------
 
     history = get_historical_data(
         ticker,
@@ -1060,14 +846,10 @@ def scan_ticker(
     if history.empty:
 
         diagnostics["errors"].append(
-            "Could not retrieve historical data."
+            "No historical data."
         )
 
         return candidates, diagnostics
-
-    # --------------------------------------------------------
-    # Indicators
-    # --------------------------------------------------------
 
     indicators = get_latest_indicators(
         history
@@ -1076,7 +858,7 @@ def scan_ticker(
     if indicators is None:
 
         diagnostics["errors"].append(
-            "Could not calculate indicators."
+            "Indicators unavailable."
         )
 
         return candidates, diagnostics
@@ -1087,26 +869,18 @@ def scan_ticker(
 
     diagnostics["trend"] = trend
 
-    # --------------------------------------------------------
-    # Support / resistance
-    # --------------------------------------------------------
-
     support, resistance = (
         calculate_support_resistance(
             history
         )
     )
 
-    # --------------------------------------------------------
-    # Expirations
-    # --------------------------------------------------------
-
     try:
 
         expirations = get_valid_expirations(
             ticker,
             min_dte=min_dte,
-            max_dte=max_dte
+            max_dte=max_dte,
         )
 
     except Exception as exc:
@@ -1121,25 +895,16 @@ def scan_ticker(
         "expirations"
     ] = len(expirations)
 
-    # --------------------------------------------------------
-    # Scan expirations
-    # --------------------------------------------------------
-
     for expiration in expirations:
-
-        diagnostics[
-            "expiration_scans"
-        ] += 1
 
         try:
 
-            expiration_candidates, expiration_stats = (
+            expiration_candidates, stats = (
                 scan_expiration(
                     ticker=ticker,
                     expiration=expiration,
                     current_price=current_price,
                     indicators=indicators,
-                    trend=trend,
                     support=support,
                     resistance=resistance,
                     target_delta=target_delta,
@@ -1156,48 +921,42 @@ def scan_ticker(
             diagnostics[
                 "option_rows"
             ] += (
-                expiration_stats["calls"]
-                + expiration_stats["puts"]
+                stats["calls"]
+                + stats["puts"]
             )
 
             diagnostics[
                 "delta_estimates"
-            ] += (
-                expiration_stats[
-                    "put_delta_estimates"
-                ]
-                + expiration_stats[
-                    "call_delta_estimates"
-                ]
-            )
+            ] += stats[
+                "delta_estimates"
+            ]
 
             diagnostics[
                 "target_matches"
-            ] += (
-                expiration_stats[
-                    "put_target_matches"
-                ]
-                + expiration_stats[
-                    "call_target_matches"
-                ]
-            )
+            ] += stats[
+                "target_matches"
+            ]
 
             diagnostics[
                 "spreads_built"
-            ] += expiration_stats[
+            ] += stats[
                 "spreads_built"
             ]
 
-            if "error" in expiration_stats:
+            if stats["error"]:
 
-                diagnostics["errors"].append(
+                diagnostics[
+                    "errors"
+                ].append(
                     f"{expiration}: "
-                    f"{expiration_stats['error']}"
+                    f"{stats['error']}"
                 )
 
         except Exception as exc:
 
-            diagnostics["errors"].append(
+            diagnostics[
+                "errors"
+            ].append(
                 f"{expiration}: {exc}"
             )
 
@@ -1205,7 +964,7 @@ def scan_ticker(
 
 
 # ============================================================
-# MARKET SCANNER
+# MARKET
 # ============================================================
 
 def scan_market(
@@ -1215,10 +974,13 @@ def scan_market(
     min_dte=DEFAULT_MIN_DTE,
     max_dte=DEFAULT_MAX_DTE,
     risk_free_rate=DEFAULT_RISK_FREE_RATE,
-    fallback_iv=DEFAULT_FALLBACK_IV,
+    **kwargs,
 ):
     """
-    Scan the selected ETF universe.
+    Scan the ETF universe.
+
+    **kwargs is intentionally accepted so the scanner remains
+    compatible with the existing app.py while we debug it.
     """
 
     if tickers is None:
@@ -1238,16 +1000,13 @@ def scan_market(
 
         try:
 
-            candidates, ticker_stats = (
-                scan_ticker(
-                    ticker=ticker,
-                    target_delta=target_delta,
-                    spread_width=spread_width,
-                    min_dte=min_dte,
-                    max_dte=max_dte,
-                    risk_free_rate=risk_free_rate,
-                    fallback_iv=fallback_iv,
-                )
+            candidates, stats = scan_ticker(
+                ticker=ticker,
+                target_delta=target_delta,
+                spread_width=spread_width,
+                min_dte=min_dte,
+                max_dte=max_dte,
+                risk_free_rate=risk_free_rate,
             )
 
             all_candidates.extend(
@@ -1255,7 +1014,7 @@ def scan_market(
             )
 
             diagnostics.append(
-                ticker_stats
+                stats
             )
 
         except Exception as exc:
@@ -1266,7 +1025,6 @@ def scan_market(
                     "current_price": None,
                     "trend": None,
                     "expirations": 0,
-                    "expiration_scans": 0,
                     "option_rows": 0,
                     "delta_estimates": 0,
                     "target_matches": 0,
@@ -1278,7 +1036,7 @@ def scan_market(
             )
 
     # --------------------------------------------------------
-    # Sort candidates
+    # Results
     # --------------------------------------------------------
 
     if all_candidates:
@@ -1287,30 +1045,28 @@ def scan_market(
             all_candidates
         )
 
-        # Best candidates first:
-        # PASS → REVIEW → FAIL
-        status_order = {
+        order = {
             "PASS": 0,
             "REVIEW": 1,
             "FAIL": 2,
         }
 
-        results["_status_order"] = (
+        results["_order"] = (
             results["status"]
-            .map(status_order)
+            .map(order)
             .fillna(9)
         )
 
         results = results.sort_values(
             [
-                "_status_order",
+                "_order",
                 "short_delta",
                 "dte",
             ]
         )
 
         results = results.drop(
-            columns=["_status_order"]
+            columns=["_order"]
         )
 
     else:
@@ -1321,14 +1077,12 @@ def scan_market(
 
 
 # ============================================================
-# DIAGNOSTIC SUMMARY
+# DIAGNOSTIC TABLE
 # ============================================================
 
-def summarize_diagnostics(diagnostics):
-    """
-    Convert scanner diagnostics into a DataFrame
-    suitable for Streamlit display.
-    """
+def summarize_diagnostics(
+    diagnostics
+):
 
     rows = []
 
@@ -1363,7 +1117,7 @@ def summarize_diagnostics(diagnostics):
                     0
                 ),
 
-                "0.10–0.18 Delta": item.get(
+                "0.10–0.18 Matches": item.get(
                     "target_matches",
                     0
                 ),
