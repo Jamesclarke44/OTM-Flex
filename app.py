@@ -20,6 +20,8 @@ from Modules.rules import (
     calculate_profit_target,
 )
 
+from Modules.questionable_trade import render_questionable_check
+
 from Modules.position_sizing import (
     analyze_position,
 )
@@ -777,6 +779,16 @@ elif page == "Rule Checker":
                 st.caption(
                     rule["explanation"]
                 )
+
+    render_questionable_check(
+        spread_type=spread_type,
+        current_price=current_price,
+        short_strike=short_strike,
+        distance_atr=distance_atr,
+        rsi=rsi,
+        macd=macd,
+        macd_signal=macd_signal,
+    )
 
 
 # =========================================================
