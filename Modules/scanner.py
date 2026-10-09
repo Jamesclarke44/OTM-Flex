@@ -1073,7 +1073,8 @@ def scan_market(
 
         results = pd.DataFrame()
 
-    return results, diagnostics
+    results.attrs["diagnostics"] = diagnostics
+    return results
 
 
 # ============================================================
